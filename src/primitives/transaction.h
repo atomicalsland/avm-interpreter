@@ -12,6 +12,7 @@
 #include <script/script.h>
 #include <serialize.h>
 #include "hash.h"
+#include <iostream>
 
 static const int SERIALIZE_TRANSACTION = 0x00;
  
@@ -243,7 +244,6 @@ template<typename Stream, typename TxType>
 void SerializeTransaction(const TxType& tx, Stream& s)
 {
     const bool fAllowWitness = true;
-
     s << tx.nVersion;
     unsigned char flags = 0;
     // Consistency check
@@ -268,7 +268,6 @@ void SerializeTransaction(const TxType& tx, Stream& s)
     }
     s << tx.nLockTime;
 }
-
 
 class CTransaction;
 using CTransactionRef = std::shared_ptr<const CTransaction>;
@@ -445,7 +444,7 @@ static inline CTransactionRef MakeTransactionRef(Tx &&txIn) {
 
 /** Precompute sighash midstate to avoid quadratic hashing */
 struct PrecomputedTransactionData {
-    uint256 hashPrevouts, hashSequence, hashOutputs, hashOutputHashes;
+    uint256 hashPrevouts, hashSequence, hashOutputs;
 
     PrecomputedTransactionData() = default;
 

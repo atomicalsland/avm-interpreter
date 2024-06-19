@@ -121,13 +121,13 @@ enum class ScriptError {
     INVALID_AVM_CHECKTXINBLOCK_ERROR,               // Used
     INVALID_AVM_TXID_SIZE,                          // Used
     INVALID_AVM_HASH_FUNC,                          // Used
-    INVALID_AVM_FT_BALANCE_ADD_AMOUNT,              // Used
     INVALID_AVM_FT_BALANCE_ADD_INVALID,             // Used
     INVALID_AVM_NFT_PUT_INVALID,                    // Used
     INVALID_AVM_AUTH_INVALID_INDEX,                 // Used
     INVALID_AVM_AUTH_INVALID_NAMESPACE,             // Used
-    INVALID_AVM_AUTH_INVALID_SIGHASH,               // todo
-    INVALID_AVM_AUTH_INVALID,                       // todo
+    INVALID_AVM_CHECKAUTHSIG,                       // Used
+    INVALID_AVM_CHECKAUTHSIGVERIFY,                 // Used
+    INVALID_AVM_CHECKAUTHSIGNULL,                   // Used      
     // Script enhancements
     SCRIPT_ERR_BIG_INT
 };
@@ -158,5 +158,7 @@ inline bool set_error_op_num(unsigned int *ret, const unsigned int num) {
     }
     return false;
 }
+
+constexpr auto bitsPerByte{8};
 
 } // namespace

@@ -22,6 +22,7 @@
 #include <script/script_num.h>
 #include "serialize_number.h"
 #include "big_int.h"
+#include <iostream>
 
 // Maximum number of bytes pushable to the stack
 static constexpr unsigned int MAX_SCRIPT_ELEMENT_SIZE = 4000;
@@ -160,11 +161,11 @@ enum opcodetype {
     OP_HASH160 = 0xa9,
     OP_HASH256 = 0xaa,
 
-    // OP_CODESEPARATOR = 0xab,         // Not used in AVM
-    // OP_CHECKSIG = 0xac,              // Not used in AVM
-    // OP_CHECKSIGVERIFY = 0xad,        // Not used in AVM
-    // OP_CHECKMULTISIG = 0xae,         // Not used in AVM
-    // OP_CHECKMULTISIGVERIFY = 0xaf,   // Not used in AVM
+    OP_CODESEPARATOR = 0xab,         // Not used in AVM
+    OP_CHECKSIG = 0xac,              // Not used in AVM
+    OP_CHECKSIGVERIFY = 0xad,        // Not used in AVM
+    OP_CHECKMULTISIG = 0xae,         // Not used in AVM
+    OP_CHECKMULTISIGVERIFY = 0xaf,   // Not used in AVM
 
     // expansion
     OP_NOP1 = 0xb0,
@@ -187,20 +188,19 @@ enum opcodetype {
     // additional byte string operations
     OP_REVERSEBYTES = 0xbc,
 
+    OP_CHECKAUTHSIG = 0xc0,          // TESTED.
+    OP_CHECKAUTHSIGVERIFY = 0xc1,    // TESTED.
+
     // Native Introspection opcodes
-    // OP_INPUTINDEX = 0xc0,                // Not used in AVM
-    // OP_ACTIVEBYTECODE = 0xc1,            // Not used in AVM
     OP_TXVERSION = 0xc2,
     OP_TXINPUTCOUNT = 0xc3,
     OP_TXOUTPUTCOUNT = 0xc4,
     OP_TXLOCKTIME = 0xc5,
-    // OP_UTXOVALUE = 0xc6,                 // Not used in AVM
-    // OP_UTXOBYTECODE = 0xc7,              // Not used in AVM
     OP_OUTPOINTTXHASH = 0xc8,
     OP_OUTPOINTINDEX = 0xc9,
-    OP_INPUTBYTECODE = 0xca,                // Not tested
-    OP_INPUTSEQUENCENUMBER = 0xcb,          // Not tested
-    OP_INPUTWITNESSBYTECODE = 0xcc,         // Not tested
+    OP_INPUTBYTECODE = 0xca,            // TESTED.
+    OP_INPUTSEQUENCENUMBER = 0xcb,      // TESTED.
+    OP_INPUTWITNESSBYTECODE = 0xcc,     // NOT WORKING. NOT USED
     OP_OUTPUTVALUE = 0xcd,
     OP_OUTPUTBYTECODE = 0xce,
  
@@ -226,9 +226,8 @@ enum opcodetype {
     OP_GETBLOCKINFO = 0xfb,             // TESTED. Get block info for height.
     OP_DECODEBLOCKINFO = 0xfc,          // TESTED. Decode a block header into the parts
 
-    OP_HASH_FN = 0xfe,                  // TESTED. Various hash functions
-    OP_AUTH_INFO = 0xff,                // TODO: need to test OP_INPUTBYTECODE and OP_INPUTSEQUENCENUMBER and OP_INPUTWITNESSBYTECODE first
-
+    OP_HASH_FN = 0xfd,                  // TESTED. Various hash functions
+   
     // The first op_code value after all defined opcodes
     FIRST_UNDEFINED_OP_VALUE,
 
@@ -658,8 +657,33 @@ public:
      * entering the UTXO set.
      */
     bool IsUnspendable() const {
-        // We currently only detect OP_FALSE OP_RETURN as provably unspendable.
-        return  (size() > 1 && *begin() == OP_FALSE && *(begin() + 1) == OP_RETURN);
+        // We currently only detect OP_RETURN as provably unspendable.
+        return (size() > 0 && *begin() == OP_RETURN);
+    }
+
+    bool IsSigOpReturn(std::vector<uint8_t>& sig) const {
+        if (!IsUnspendable()) {
+            return false;
+        }
+        bool hasSigMarker = *(begin() + 1) == 0x03 && *(begin() + 2) == 0x73 && *(begin() + 3) == 0x69 && *(begin() + 4) == 0x67;
+        if (!hasSigMarker) {
+            return false;
+        }
+        // Get the next push data
+        opcodetype opcode;
+        std::vector<uint8_t> item;
+        // Get the op at the 6th position
+        CScript::const_iterator it = begin() + 5;
+        if (GetOp(it, opcode, item)) {
+            // It was not a push data therefore it could not be a sig data
+            if (opcode > OP_PUSHDATA4) {
+                return false;
+            }
+            // It could be a signature type. Unknown length, but it could be 
+            sig = item;
+            return true;
+        }
+        return false;
     }
 
     void clear() {

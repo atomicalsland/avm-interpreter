@@ -10,6 +10,7 @@
 #include <script/script_flags.h>
 
 #include <boost/range/adaptor/sliced.hpp>
+#include <iostream>
 
 typedef boost::sliced_range<const valtype> slicedvaltype;
 

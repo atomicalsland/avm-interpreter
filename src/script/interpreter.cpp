@@ -147,8 +147,6 @@ static bool IsOpcodeDisabled(opcodetype opcode, uint32_t flags) {
     switch (opcode) {
         case OP_2MUL:
         case OP_2DIV:
-        case OP_LSHIFT:
-        case OP_RSHIFT:
             // Disabled opcodes.
             return true;
         case OP_INVERT:
@@ -425,6 +423,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                         bool fValue = false;
                         if (fExec) {
                             if (stack.size() < 1) {
+                                std::cout << "UNBALANCED_CONDITIONAL: size < 1" << std::endl;
                                 return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
                             }
                             valtype &vch = stacktop(-1);
@@ -447,6 +446,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
 
                     case OP_ELSE: {
                         if (vfExec.empty()) {
+                            std::cout << "UNBALANCED_CONDITIONAL: else empty" << std::endl;
                             return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
                         }
                         vfExec.toggle_top();
@@ -454,6 +454,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
 
                     case OP_ENDIF: {
                         if (vfExec.empty()) {
+                            std::cout << "UNBALANCED_CONDITIONAL:end ifvfExec is empty" << std::endl;
                             return set_error(serror, ScriptError::UNBALANCED_CONDITIONAL);
                         }
                         vfExec.pop_back();
@@ -733,48 +734,72 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                         }
                     } break;
 
-                        /*
-                        case OP_LSHIFT: {
-                            // (x n -- out)
-                            if (stack.size() < 2) {
-                                return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
-                            }
+                    case OP_LSHIFT: {
+                        // (x n -- out)
+                        if (stack.size() < 2) {
+                            return set_error(serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
 
-                            const valtype vch1 = stacktop(-2);
-                            CScriptNum n(stacktop(-1), maxIntegerSize);
-                            if (n < 0) {
-                                return set_error(serror, ScriptError::INVALID_NUMBER_RANGE);
-                            }
+                        const valtype vch1 = stacktop(-2);
+                        CScriptNum n(stacktop(-1), maxIntegerSize);
+                        if (n < 0) {
+                            return set_error(serror, ScriptError::INVALID_NUMBER_RANGE);
+                        }
 
-                            popstack(stack);
-                            popstack(stack);
-                            stack.push_back(LShift(vch1, n.getint()));
-                        } break;
+                        stack.pop_back();
+                        stack.pop_back();
 
-                        case OP_RSHIFT: {
-                            // (x n -- out)
-                            if (stack.size() < 2) {
-                                return set_error( serror, ScriptError::INVALID_STACK_OPERATION);
-                            }
+                        auto values{vch1};
+                        std::cout << "Pushing back values lshift before: " << HexStr(values) << std::endl;
+                        if(n >= values.size() * bitsPerByte)
+                            fill(begin(values), end(values), 0);
+                        else
+                        {
+                            do
+                            {
+                                values = LShift(values, n.getint());
+                                n -= CScriptNum{avm::bigint{INT32_MAX}};
+                            } while(n > 0);
+                        }
+                        std::cout << "Pushing back values lshift: " << HexStr(values) << std::endl;
+                        stack.push_back(values);
+                    } break;
 
-                            const valtype vch1 = stacktop(-2);
-                            CScriptNum n(stacktop(-1), maxIntegerSize);
-                            if (n < 0) {
-                                return set_error(serror, ScriptError::INVALID_NUMBER_RANGE);
-                            }
+                    case OP_RSHIFT: {
+                        // (x n -- out)
+                        if (stack.size() < 2) {
+                            return set_error( serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
 
-                            popstack(stack);
-                            popstack(stack);
-                            stack.push_back(RShift(vch1, n.getint()));
-                        } break;
-                        */
+                        const valtype vch1 = stacktop(-2);
+                        CScriptNum n(stacktop(-1), maxIntegerSize);
+                        if (n < 0) {
+                            return set_error(serror, ScriptError::INVALID_NUMBER_RANGE);
+                        }
+
+                        stack.pop_back();
+                        stack.pop_back();
+                        auto values{vch1};
+                        std::cout << "Pushing back values rshift before: " << HexStr(values) << std::endl;
+                        if(n >= values.size() * bitsPerByte)
+                            fill(begin(values), end(values), 0);
+                        else
+                        {
+                            do
+                            {
+                                values = RShift(values, n.getint());
+                                n -= CScriptNum{avm::bigint{INT32_MAX}};
+                            } while(n > 0);
+                        }
+                        std::cout << "Pushing back values rshift: " << HexStr(values) << std::endl;
+                        stack.push_back(values);
+
+                    } break;
 
                     case OP_EQUAL:
                     case OP_EQUALVERIFY:
                         // case OP_NOTEQUAL: // use OP_NUMNOTEQUAL
                         {
-                            std::cerr << "OP_EQUAL/OP_EQUALVERIFY" << std::endl;
-
                             // (x1 x2 - bool)
                             if (stack.size() < 2) {
                                 valtype &vch2 = stacktop(-1);
@@ -782,8 +807,9 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                             }
                             valtype &vch1 = stacktop(-2);
                             valtype &vch2 = stacktop(-1);
-                            std::cerr << "OP_EQUAL/OP_EQUALVERIFY: val1=" << HexStr(vch1) << ", val2=" << HexStr(vch2)
-                                      << std::endl;
+
+                            std::cerr << "OP_EQUAL/OP_EQUALVERIFY: val1=" << HexStr(vch1)
+                                              << ", val2=" << HexStr(vch2) << std::endl;
 
                             bool fEqual = (vch1 == vch2);
                             // OP_NOTEQUAL is disabled because it would be too
@@ -795,6 +821,8 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                             popstack(stack);
                             popstack(stack);
                             stack.push_back(fEqual ? vchTrue : vchFalse);
+
+ 
                             if (opcode == OP_EQUALVERIFY) {
                                 if (fEqual) {
                                     popstack(stack);
@@ -1044,6 +1072,45 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                         }
                     } break;
 
+                    case OP_CHECKAUTHSIG: 
+                    case OP_CHECKAUTHSIGVERIFY: {
+                        valtype vchSig;
+                        valtype vchPubKey;
+                        // If a signature and pubKey are provided then they must be in the right format and valid or we error out
+                        auto hasAuthSig = context->getAuthSig(vchSig);
+                        auto hasAuthPubKey = context->getAuthPubKey(vchPubKey);
+                        // If either the sig or public key is provided then we error out script if anything is invalid
+                        if (hasAuthSig || hasAuthPubKey) {
+                            if (!hasAuthSig || 
+                                !hasAuthPubKey || 
+                                !CheckDataSignatureEncoding(vchSig, flags, serror) ||
+                                !CheckPubKeyEncoding(vchPubKey, flags, serror)) {
+                                    return set_error(serror, ScriptError::INVALID_AVM_CHECKAUTHSIG);
+                            }
+                            // The formats are correct and now validate signature
+                            auto vchMessage = context->getAuthMessage();
+                            bool fSuccess = false;
+                            valtype vchHash(32);
+                            CSHA256().Write(vchMessage.data(), vchMessage.size()).Finalize(vchHash.data());
+                            fSuccess = checker.VerifySignature(vchSig, CPubKey(vchPubKey), uint256(vchHash));
+                            if (!fSuccess) {
+                                return set_error(serror, ScriptError::INVALID_AVM_CHECKAUTHSIGNULL);
+                            }
+                            // Add the validated and authorized public key to the stack
+                            stack.push_back(vchPubKey);
+                        } else {
+                            // If neither was provided then just indicate there is no authorized user
+                            // Just indicate no authorized user attempted to be provided
+                            if (opcode == OP_CHECKAUTHSIGVERIFY) {
+                                // IN the case of OP_CHECKAUTHSIGVERIFY we fail the script
+                                return set_error(serror, ScriptError::INVALID_AVM_CHECKAUTHSIGVERIFY);
+                            } else {
+                                // Otherwise we put false on the stack
+                                stack.push_back(vchFalse);
+                            }
+                        } 
+                    } break;
+ 
                     //
                     // Byte string operations
                     //
@@ -1203,8 +1270,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                     case OP_OUTPUTVALUE:
                     case OP_OUTPUTBYTECODE:
                     case OP_INPUTBYTECODE: 
-                    case OP_INPUTSEQUENCENUMBER:
-                    case OP_INPUTWITNESSBYTECODE:  {
+                    case OP_INPUTSEQUENCENUMBER: {
                         if (!context) {
                             return set_error(serror, ScriptError::CONTEXT_NOT_PRESENT);
                         }
@@ -1233,6 +1299,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                         popstack(stack); // consume element
 
                         switch (opcode) {
+
                             case OP_OUTPOINTTXHASH: {
                                 if (index < 0 || index >= context->tx().vin().size()) {
                                     return set_error(serror, ScriptError::INVALID_TX_INPUT_INDEX);
@@ -1260,6 +1327,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                                 if (inputScript.size() > MAX_SCRIPT_ELEMENT_SIZE) {
                                     return set_error(serror, ScriptError::PUSH_SIZE);
                                 }
+                                std::cout << "OP_INPUTBYTECODE: " << HexStr(inputScript) << std::endl;
                                 stack.emplace_back(inputScript.begin(), inputScript.end());
                             } break;
 
@@ -1269,19 +1337,8 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                                 }
                                 auto const& input = context->tx().vin()[index];
                                 CScriptNum const bn(input.nSequence);
-                              
+                                std::cout << "OP_INPUTSEQUENCENUMBER: " << input.nSequence << std::endl;
                                 stack.push_back(bn.getvch());
-                            } break;
-
-                            case OP_INPUTWITNESSBYTECODE: {
-                                if ( ! is_valid_input_index()) {
-                                    return false; // serror set by is_invalid_input_index lambda
-                                }
-                                auto const& inputWitnessScript = context->scriptWitness(index);
-                                if (inputWitnessScript.size() > MAX_SCRIPT_ELEMENT_SIZE) {
-                                    return set_error(serror, ScriptError::PUSH_SIZE);
-                                }
-                                stack.emplace_back(inputWitnessScript.begin(), inputWitnessScript.end());
                             } break;
 
                             case OP_OUTPUTVALUE: {
@@ -1313,7 +1370,8 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                     // Atomicals Virtual Machine opcodes (Unary)
                     case OP_FT_COUNT:
                     case OP_NFT_COUNT: 
-                    case OP_NFT_PUT: {
+                    case OP_NFT_PUT: 
+                    case OP_FT_BALANCE_ADD: {
                         if (!context) {
                             return set_error(serror, ScriptError::CONTEXT_NOT_PRESENT);
                         }
@@ -1326,7 +1384,21 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                         valtype &n = stacktop(-1);
 
                         switch (opcode) {
+                            case OP_FT_BALANCE_ADD: {
+                                if (n.size() != 36) {
+                                    return set_error(serror, ScriptError::INVALID_ATOMICAL_REF_SIZE);
+                                } 
+                                uint288 atomref(n);
+                                if (!stateContext.contractFtBalanceAdd(atomref)) {
+                                    return set_error(serror, ScriptError::INVALID_AVM_FT_BALANCE_ADD_INVALID);
+                                }
+                                popstack(stack); // consume element
+                            } break;
+
                             case OP_NFT_PUT: {
+                                if (n.size() != 36) {
+                                    return set_error(serror, ScriptError::INVALID_ATOMICAL_REF_SIZE);
+                                } 
                                 uint288 atomref(n);
                                 if (!stateContext.contractNftPut(atomref)) {
                                     return set_error(serror, ScriptError::INVALID_AVM_NFT_PUT_INVALID);
@@ -1386,9 +1458,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                     case OP_FT_BALANCE:
                     case OP_FT_ITEM:
                     case OP_NFT_ITEM:
-                    case OP_NFT_EXISTS: 
-                    case OP_FT_BALANCE_ADD:
-                    case OP_AUTH_INFO: {
+                    case OP_NFT_EXISTS: {
                         if (!context) {
                             return set_error(serror, ScriptError::CONTEXT_NOT_PRESENT);
                         }
@@ -1402,39 +1472,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                         valtype &vch2 = stacktop(-1);
 
                         switch (opcode) {
-                            case OP_AUTH_INFO: {
-                                CScriptNum sn(vch2, maxIntegerSize);
-                                auto authInputIndex = sn.getint();
-                                if (authInputIndex < 0 || uint64_t(authInputIndex) >= context->tx().vin().size()) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID_INDEX);
-                                }
-                                valtype authPubKeyResult(32);
-                                auto authInfoResult = stateContext.getAuthInfo(vch1, authInputIndex, authPubKeyResult);
-                                if (authInfoResult == GetAuthInfoResult::OK) {
-                                    popstack(stack); // consume element
-                                    popstack(stack); // consume element
-                                    stack.push_back(authPubKeyResult);
-                                } else if (authInfoResult == GetAuthInfoResult::ERR_NAMESPACE) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID_NAMESPACE);
-                                } else if (authInfoResult == GetAuthInfoResult::ERR_SIGHASH) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID_SIGHASH);
-                                } else {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID);
-                                }  
-                            } break;
-                            case OP_FT_BALANCE_ADD: {
-                                uint288 atomref(vch1);
-                                CScriptNum sn(vch2, maxIntegerSize);
-                                uint64_t amountToAdd = sn.getint();
-                                if (amountToAdd <= 0) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_FT_BALANCE_ADD_AMOUNT);
-                                }
-                                if (!stateContext.contractFtBalanceAdd(atomref, amountToAdd)) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_FT_BALANCE_ADD_INVALID);
-                                }
-                                popstack(stack); // consume element
-                                popstack(stack); // consume element
-                            } break;
+                          
                             case OP_GETBLOCKINFO: {
                                 CScriptNum const sn1(vch1, maxIntegerSize);
                                 auto const heightNumber = sn1.getint();
@@ -1604,6 +1642,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
                                 }
                             } break;
                             case OP_KV_DELETE: {
+                                std::cout << "OP_KV_DELETE" << std::endl;
                                 stateContext.contractStateDelete(vch1, vch2);
                                 popstack(stack); // consume element
                                 popstack(stack); // consume element
@@ -1783,6 +1822,7 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script, uint32_t fla
             }
         }
     } catch (const avm::BigIntException &) {
+        std::cerr << "avm::BigIntException" << std::endl;
         return set_error(serror, ScriptError::SCRIPT_ERR_BIG_INT);
     } catch (const std::exception &ex) {
         std::cerr << ex.what() << std::endl;

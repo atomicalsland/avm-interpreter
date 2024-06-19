@@ -307,6 +307,7 @@ bool CScript::IsPayToScriptHash() const {
             (*this)[1] == 0x14 && (*this)[22] == OP_EQUAL);
 }
 
+
 bool CScript::IsCommitment(const std::vector<uint8_t> &data) const {
     // To ensure we have an immediate push, we limit the commitment size to 64
     // bytes. In addition to the data themselves, we have 2 extra bytes:

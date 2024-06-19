@@ -92,6 +92,18 @@ static bool DecodeHexBlockHeaderDup(const std::string &hex_header, CBlockHeader 
     return true;
 }
 
+static std::vector<uint8_t> writeUint64(uint64_t x) {
+    std::vector<uint8_t> v;
+    v.assign( reinterpret_cast<uint8_t *>( &x ), reinterpret_cast<uint8_t *>( &x ) + sizeof( x ) );
+    return v;
+}
+
+static std::vector<uint8_t> writeUint32(uint32_t x) {
+    std::vector<uint8_t> v;
+    v.assign( reinterpret_cast<uint8_t *>( &x ), reinterpret_cast<uint8_t *>( &x ) + sizeof( x ) );
+    return v;
+}
+ 
 class ScriptExecutionContext {
     /// All the inputs in a tx share this object
     struct Shared {
@@ -104,11 +116,13 @@ class ScriptExecutionContext {
     using SharedPtr = std::shared_ptr<const Shared>;
 
     SharedPtr shared;
+    std::vector<uint8_t> _fullScript;   // the full unlock+lock script to execute
+    std::vector<uint8_t> _pubKey;       // Auth pubKey if provided
 
     /// Construct a specific context for this input, given a tx.
     /// Use this constructor for the first input in a tx.
     /// All of the coins for the tx will get pre-cached and a new internal Shared object will be constructed.
-    ScriptExecutionContext(const CCoinsViewCache &coinsCache, CTransactionView tx);
+    ScriptExecutionContext(const CCoinsViewCache &coinsCache, CTransactionView tx, const std::vector<uint8_t>& fullScript, const std::vector<uint8_t>& pubKey);
 
 public:
     /// Construct a specific context for this input, given another context.
@@ -117,7 +131,7 @@ public:
     ScriptExecutionContext(const ScriptExecutionContext &sharedContext);
 
     /// Factory method to create a context for all inputs in a tx.
-    static ScriptExecutionContext createForTx(CTransactionView tx, const CCoinsViewCache &coinsCache);
+    static ScriptExecutionContext createForTx(CTransactionView tx, const CCoinsViewCache &coinsCache, const std::vector<uint8_t>& fullScript, const std::vector<uint8_t>& pubKey);
 
     /// The transaction associated with this script evaluation context.
     const CTransactionView &tx() const { return shared->tx; }
@@ -126,10 +140,60 @@ public:
     const CScript & scriptSig(unsigned inputIdx) const {
          return tx().vin().at(inputIdx).scriptSig;
     }
+ 
+    bool getAuthPubKey(std::vector<uint8_t>& pubKey) const {
+        if (_pubKey.size()) {
+            pubKey = _pubKey;
+            return true;
+        }
+        return false;
+    }
 
-    /// Get the witness script for the input index
-    const CScript& scriptWitness(unsigned inputIdx) const {
-        return tx().vin().at(inputIdx).scriptWitness.stack;
+    bool getAuthSig(std::vector<uint8_t>& sig) const {
+        for (unsigned int index = 0; index < tx().vout().size(); index++) {
+            auto const &output = tx().vout()[index];
+            auto const &outputScript = tx().vout()[index].scriptPubKey;
+            std::vector<uint8_t> outputScriptVec(outputScript.begin(), outputScript.end());
+            if (outputScript.IsSigOpReturn(sig)) {
+               return true;
+            }
+        }
+        return false;
+    }
+
+    // Produces the authorization vector to be signed to authorize the avm call
+    std::vector<uint8_t> getAuthMessage() const {
+        // Format:
+        // prevTx + prevIndex + unlockscript + lockscript + Array(outputValue+outputScript) 
+        // Note: The OP_RETURN for the "sig" signature is not included in the outputValue+OutputScript array, it is skipped... 
+        // ... just includes all other outputs.
+        // 
+        //
+        std::vector<uint8_t> authMessage;
+        auto const &input = tx().vin()[0];
+        auto const &txid = input.prevout.GetTxId();
+        // prevTx
+        authMessage.insert(authMessage.end(), txid.begin(), txid.end());
+        // prevIndex
+        std::vector<uint8_t> prevoutN = writeUint32(input.prevout.GetN());
+        authMessage.insert(authMessage.end(), prevoutN.begin(), prevoutN.end());
+        // unlockscript+lockscript
+        authMessage.insert(authMessage.end(), _fullScript.begin(), _fullScript.end());
+        // For each output, serialize but skip the op_return which contains the signature
+        for (unsigned int index = 0; index < tx().vout().size(); index++) {
+            auto const &output = tx().vout()[index];
+            CScriptNum const bn(output.nValue / SATOSHI);
+            std::vector<uint8_t> outputValVec = writeUint64(bn.getint());
+            auto const &outputScript = tx().vout()[index].scriptPubKey;
+            std::vector<uint8_t> outputScriptVec(outputScript.begin(), outputScript.end());
+            std::vector<uint8_t> sig;
+            if (!outputScript.IsSigOpReturn(sig)) {
+                authMessage.insert(authMessage.end(), outputValVec.begin(), outputValVec.end());
+                authMessage.insert(authMessage.end(), outputScriptVec.begin(), outputScriptVec.end());
+            }
+        }
+        // std::cerr << "getAuthMessage: " << HexStr(authMessage) << std::endl;
+        return authMessage;
     }
 };
 
@@ -146,7 +210,7 @@ class ScriptStateContext {
     json _nftBalancesUpdates;
 
     std::set<uint288> _ftAddsSet;
-    std::set<uint288> _nftAddsSet;
+    std::set<uint288> _nftPutsSet;
 
     std::map<uint288, std::map<uint32_t, uint64_t>> _ftWithdrawMap;
     std::map<uint288, uint32_t> _nftWithdrawMap;
@@ -186,12 +250,14 @@ public:
     json const &getNftBalancesUpdatesResult() const { return _nftBalancesUpdates; }
     json getFtWithdrawsResult() const;
     json getNftWithdrawsResult() const;
+    json getFtIncomingBalancesAddedResult() const;
+    json getNftIncomingPutsResult() const;
  
     GetAuthInfoResult getAuthInfo(const std::vector<uint8_t> &keySpace, uint32_t idx, std::vector<uint8_t> &resultPubKey) const;
 
     // contract token enumeration and balances
     uint64_t contractFtBalance(const uint288 &ftId);
-    bool contractFtBalanceAdd(const uint288& ftId, uint64_t amount);
+    bool contractFtBalanceAdd(const uint288& ftId);
     bool allowedFtBalanceAdd(const uint288& ftId);
     bool performFtBalanceAdd(const uint288& ftId, uint64_t amount);
     uint64_t contractFtBalanceIncoming(const uint288 &ftId);
@@ -216,6 +282,8 @@ public:
     bool contractWithdrawNft(const uint288 &nftId, uint32_t index);
     bool encodeFtWithdrawMap(json &withdrawFt) const;
     bool encodeNftWithdrawMap(json &withdrawNft) const;
+    bool encodeFtIncomingBalancesAddedMap(json &ftBalancesAdded) const; 
+    bool encodeNftIncomingPutsMap(json &nftPuts) const;
 
     // Additional methods
     CBlockHeader getBlockInfoByHeight(uint32_t height) const;

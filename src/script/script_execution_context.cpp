@@ -16,17 +16,19 @@
 
 using json = nlohmann::json;
 
-ScriptExecutionContext::ScriptExecutionContext(const CCoinsViewCache &coinsCache, CTransactionView tx) {
+ScriptExecutionContext::ScriptExecutionContext(const CCoinsViewCache &coinsCache, CTransactionView tx, const std::vector<uint8_t>& fullScript, const std::vector<uint8_t>& pubKey) {
     shared = std::make_shared<Shared>(tx);
+    _fullScript = fullScript;
+    _pubKey = pubKey;
 }
 
 ScriptExecutionContext::ScriptExecutionContext(const ScriptExecutionContext &sharedContext)
-    : shared(sharedContext.shared) {
+    : shared(sharedContext.shared), _fullScript(sharedContext._fullScript), _pubKey(sharedContext._pubKey) {
     assert(shared);
 }
 /* static */
-ScriptExecutionContext ScriptExecutionContext::createForTx(CTransactionView tx, const CCoinsViewCache &coinsCache) {
-    return ScriptExecutionContext(coinsCache, tx); // private c'tor, must use push_back
+ScriptExecutionContext ScriptExecutionContext::createForTx(CTransactionView tx, const CCoinsViewCache &coinsCache, const std::vector<uint8_t>& fullScript, const std::vector<uint8_t>& pubKey) {
+    return ScriptExecutionContext(coinsCache, tx, fullScript, pubKey); // private c'tor, must use push_back
 }
 
 ScriptStateContext::ScriptStateContext(json &ftState, json &ftStateIncoming, json &nftState, json &nftStateIncoming,
@@ -73,8 +75,11 @@ void ScriptStateContext::contractStatePut(const std::vector<uint8_t> &keySpace, 
 
 void ScriptStateContext::contractStateDelete(const std::vector<uint8_t> &keySpace,
                                              const std::vector<uint8_t> &keyName) {
+    std::cout << "contractStateDelete:start" << std::endl;
     std::string keySpaceStr = HexStrWith00Null(keySpace);
     std::string keyNameStr = HexStrWith00Null(keyName);
+    std::cout << "keySpaceStr="  << keySpaceStr << std::endl;
+    std::cout << "keyNameStr="  << keyNameStr << std::endl;
     // Ensure the keyspaces exists
     json &keyspaceNodeState = ScriptStateContext::ensureKeyspaceExists(_contractState, keySpaceStr);
     json &keyspaceNodeUpdates = ScriptStateContext::ensureKeyspaceExists(_contractStateUpdates, keySpaceStr);
@@ -85,6 +90,7 @@ void ScriptStateContext::contractStateDelete(const std::vector<uint8_t> &keySpac
     keyspaceNodeUpdates.erase(keyNameStr);
     // Mark it as deleted
     keyspaceNodeDeletes[keyNameStr] = true;
+    std::cout << "contractStateDelete:end" << std::endl;
 }
 
 json::const_iterator ScriptStateContext::getKeyspaceNode(const json &entity, const std::string &keySpaceStr) {
@@ -230,7 +236,6 @@ bool ScriptStateContext::contractNftPut(const uint288 &nftId) {
         return false;
     }
     auto valtype = _nftStateIncoming[nftId.GetHex()];
-    // Get the maximum allowed balance to add
     auto incomingAllowed = valtype.template get<bool>();
     if (!incomingAllowed) {
         throw new StateValidationTokenNftBalanceFormatError();
@@ -242,8 +247,8 @@ bool ScriptStateContext::contractNftPut(const uint288 &nftId) {
 }
 
 bool ScriptStateContext::allowedNftPut(const uint288& nftId) {
-    auto it = _nftAddsSet.find(nftId);
-    if (it != _nftAddsSet.end()) {
+    auto it = _nftPutsSet.find(nftId);
+    if (it != _nftPutsSet.end()) {
         return false;
     }
     return true;
@@ -251,7 +256,7 @@ bool ScriptStateContext::allowedNftPut(const uint288& nftId) {
 
 bool ScriptStateContext::performNftPut(const uint288& nftId) {
     // Record that balance for the token id is performed
-    _nftAddsSet.insert(nftId);
+    _nftPutsSet.insert(nftId);
     std::string nftIdStr = nftId.GetHex();
     if (!_nftStateIncoming.contains(nftIdStr)) {
         // No incoming balance can be added
@@ -263,7 +268,7 @@ bool ScriptStateContext::performNftPut(const uint288& nftId) {
     return true;
 }
 
-bool ScriptStateContext::contractFtBalanceAdd(const uint288& ftId, uint64_t amount) {
+bool ScriptStateContext::contractFtBalanceAdd(const uint288& ftId) {
     if (!_ftStateIncoming.contains(ftId.GetHex())) {
         // No incoming balance can be added
         return false;
@@ -274,8 +279,8 @@ bool ScriptStateContext::contractFtBalanceAdd(const uint288& ftId, uint64_t amou
     }
     auto valtype = _ftStateIncoming[ftId.GetHex()];
     // Get the maximum allowed balance to add
-    // auto allowedToAddUpTo = valtype.template get<std::uint64_t>();
-    if (!performFtBalanceAdd(ftId, amount)) {
+    auto allowedToAddUpTo = valtype.template get<std::uint64_t>();
+    if (!performFtBalanceAdd(ftId, allowedToAddUpTo)) {
         return false;
     }
     return true;
@@ -759,20 +764,45 @@ json ScriptStateContext::getNftWithdrawsResult() const {
     }  
     return nftWithdraws;
 }
+ 
+json ScriptStateContext::getFtIncomingBalancesAddedResult() const {
+    json ftBalancesAdded({});
+    if (!this->encodeFtIncomingBalancesAddedMap(ftBalancesAdded)) {
+        throw new CriticalUnexpectedError();
+    }
+  
+    return ftBalancesAdded;
+}
+json ScriptStateContext::getNftIncomingPutsResult() const {
+    json nftPuts({});
+    if (!this->encodeNftIncomingPutsMap(nftPuts)) {
+        throw new CriticalUnexpectedError();
+    }  
+    return nftPuts;
+}
+ 
+bool ScriptStateContext::encodeFtIncomingBalancesAddedMap(json &ftBalancesAdded) const {
+    std::set<uint288>::const_iterator ftAddsSetIt;
+    json ftAddsSetJson({});
+    for (ftAddsSetIt = _ftAddsSet.begin(); ftAddsSetIt != _ftAddsSet.end(); ftAddsSetIt++) {
+        uint288 tokenId = *ftAddsSetIt;
+        std::string tokenIdS = tokenId.GetHex();
+        ftAddsSetJson[tokenIdS] = true;
+    }
+    // If succeeded, then assign
+    ftBalancesAdded = ftAddsSetJson;
+    return true;
+}
 
-GetAuthInfoResult ScriptStateContext::getAuthInfo(const std::vector<uint8_t> &keySpace, uint32_t idx, std::vector<uint8_t> &resultPubKey) const {
-    /*
-    else if (authInfoResult == GetAuthInfoResult::ERR_NAMESPACE) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID_NAMESPACE);
-                                } else if (authInfoResult == GetAuthInfoResult::ERR_SIGHASH) {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID_SIGHASH);
-                                } else {
-                                    return set_error(serror, ScriptError::INVALID_AVM_AUTH_INVALID);
-                                }
-    */
-    
-    // Check the namespace is correct
-
-
-    return GetAuthInfoResult::OK;
+bool ScriptStateContext::encodeNftIncomingPutsMap(json &nftPuts) const {
+    std::set<uint288>::const_iterator nftPutsSetIt;
+    json nftPutsJson({});
+    for (nftPutsSetIt = _nftPutsSet.begin(); nftPutsSetIt != _nftPutsSet.end(); nftPutsSetIt++) {
+        uint288 tokenId = *nftPutsSetIt;
+        std::string tokenIdS = tokenId.GetHex();
+        nftPutsJson[tokenIdS] = true;
+    }
+    // If succeeded, then assign
+    nftPuts = nftPutsJson;
+    return true;
 }

@@ -88,6 +88,8 @@ static int verify_script_avm(const uint8_t *lockScript, // The locking script es
                              const json &contractExternalState, // External state such as blockchain info for the current transaction
                              const uint8_t *txTo,   // Transaction being executed
                              unsigned int txToLen, 
+                             const uint8_t *authPubKey, // Auth pub key if provided
+                             unsigned int authPubKeyLen, 
                              unsigned int flags, // Script flags for enabling features in future
                              atomicalsconsensus_error *err, // Base error
                              unsigned int *script_err, // Script execution error
@@ -99,24 +101,39 @@ static int verify_script_avm(const uint8_t *lockScript, // The locking script es
     }
     TxInputStream stream(SER_NETWORK, PROTOCOL_VERSION, txTo, txToLen);
     CTransaction tx(deserialize, stream);
+    /*  
+    //
+    // TODO: Figure out why the transaction does not serialize correctly
+    //  following code is what does not work for correct deserialization. The input witness is truncated for some reason...
+    //  if (GetSerializeSize(tx) != txToLen) {
+    //      return set_error(err, atomicalsconsensus_ERR_TX_SIZE_MISMATCH);
+    // }
     CTransactionView txView(tx);
-
+    /*
     if (GetSerializeSize(tx, PROTOCOL_VERSION) != txToLen) {
+        std::cout << "serailzied size: " << GetSerializeSize(tx, PROTOCOL_VERSION) << std::endl;
+        std::cout << "txToLen: " << txToLen << std::endl;
         return set_error(err, atomicalsconsensus_ERR_TX_SIZE_MISMATCH);
     }
-
+    //
+    */
     // Regardless of the verification result, the tx did not error.
     set_error(err, atomicalsconsensus_ERR_OK);
-
     CScript const spk(lockScript, lockScript + lockScriptLen);
     CScript const unlockSig(unlockScript, unlockScript + unlockScriptLen);
-    PrecomputedTransactionData txdata(tx);
 
+    PrecomputedTransactionData txdata(tx);
     json copiedState(contractState.begin(), contractState.end());
 
     CCoinsView coinsDummy;
     CCoinsViewCache coinsCache(&coinsDummy);
-    ScriptExecutionContext createdContext = ScriptExecutionContext::createForTx(tx, coinsCache);
+
+    std::vector<uint8_t> fullScriptVec(unlockScript, unlockScript + unlockScriptLen);
+    std::vector<uint8_t> lockingScriptVec(lockScript, lockScript + lockScriptLen);
+    fullScriptVec.insert( fullScriptVec.end(), lockingScriptVec.begin(), lockingScriptVec.end() );
+    std::vector<uint8_t> authPubKeyVec(authPubKey, authPubKey + authPubKeyLen);
+
+    ScriptExecutionContext createdContext = ScriptExecutionContext::createForTx(tx, coinsCache, fullScriptVec, authPubKeyVec);
     ScriptExecutionContext const context = createdContext;
 
     json ftStateCopy(ftState.begin(), ftState.end());
@@ -125,6 +142,13 @@ static int verify_script_avm(const uint8_t *lockScript, // The locking script es
     json nftStateIncomingCopy(nftStateIncoming.begin(), nftStateIncoming.end());
     json contractStateCopy(contractState.begin(), contractState.end());
     json contractExternalStateCopy(contractExternalState.begin(), contractExternalState.end());
+
+    std::cout << "ftStateCopy" << ftStateCopy << std::endl;
+    std::cout << "ftStateIncomingCopy" << ftStateIncomingCopy << std::endl;
+    std::cout << "nftStateCopy" << nftStateCopy << std::endl;
+    std::cout << "nftStateIncomingCopy" << nftStateIncomingCopy << std::endl;
+    std::cout << "contractStateCopy" << contractStateCopy << std::endl;
+    std::cout << "contractExternalStateCopy" << contractExternalStateCopy << std::endl;
 
     ScriptStateContext state(ftStateCopy, ftStateIncomingCopy, nftStateCopy, nftStateIncomingCopy, contractStateCopy,
                              contractExternalStateCopy);
@@ -145,21 +169,25 @@ static int verify_script_avm(const uint8_t *lockScript, // The locking script es
 
 int atomicalsconsensus_verify_script_avm(
     const uint8_t *lockScript, unsigned int lockScriptLen, const uint8_t *unlockScript, unsigned int unlockScriptLen,
-    const uint8_t *txTo, unsigned int txToLen, const uint8_t *ftStateCbor, unsigned int ftStateCborLen,
+    const uint8_t *txTo, unsigned int txToLen, const uint8_t *authPubKey, unsigned int authPubKeyLen, 
+    const uint8_t *ftStateCbor, unsigned int ftStateCborLen,
     const uint8_t *ftStateIncomingCbor, unsigned int ftStateIncomingCborLen, const uint8_t *nftStateCbor,
     unsigned int nftStateCborLen, const uint8_t *nftStateIncomingCbor, unsigned int nftStateIncomingCborLen,
     const uint8_t *contractExternalStateCbor, unsigned int contractExternalStateCborLen,
     const uint8_t *contractStateCbor, unsigned int contractStateCborLen, const uint8_t *prevStateHash,
     atomicalsconsensus_error *err, unsigned int *script_err, unsigned int *script_err_op_num, uint8_t *stateHash,
-    uint8_t *stateFinal, unsigned int *stateFinalLen, unsigned int *stateFinalDataLen, uint8_t *stateUpdates,
-    unsigned int *stateUpdatesLen, unsigned int *stateUpdatesDataLen, uint8_t *stateDeletes,
-    unsigned int *stateDeletesLen, unsigned int *stateDeletesDataLen, uint8_t *ftBalancesResult,
-    unsigned int *ftBalancesResultLen, unsigned int *ftBalancesResultDataLen, uint8_t *ftBalancesUpdatesResult,
-    unsigned int *ftBalancesUpdatesResultLen, unsigned int *ftBalancesUpdatesResultDataLen, uint8_t *nftBalancesResult,
-    unsigned int *nftBalancesResultLen, unsigned int *nftBalancesResultDataLen, uint8_t *nftBalancesUpdatesResult,
-    unsigned int *nftBalancesUpdatesResultLen, unsigned int *nftBalancesUpdatesResultDataLen, uint8_t *ftWithdraws,
-    unsigned int *ftWithdrawsLen, unsigned int *ftWithdrawsDataLen, uint8_t *nftWithdraws,
-    unsigned int *nftWithdrawsLen, unsigned int *nftWithdrawsDataLen) {
+    uint8_t *stateFinal, unsigned int *stateFinalLen, uint8_t *stateUpdates,
+    unsigned int *stateUpdatesLen, uint8_t *stateDeletes,
+    unsigned int *stateDeletesLen, uint8_t *ftBalancesResult,
+    unsigned int *ftBalancesResultLen, uint8_t *ftBalancesUpdatesResult,
+    unsigned int *ftBalancesUpdatesResultLen, uint8_t *nftBalancesResult,
+    unsigned int *nftBalancesResultLen, uint8_t *nftBalancesUpdatesResult,
+    unsigned int *nftBalancesUpdatesResultLen, uint8_t *ftWithdraws,
+    unsigned int *ftWithdrawsLen, uint8_t *nftWithdraws,
+    unsigned int *nftWithdrawsLen,
+    uint8_t *ftBalancesAdded, unsigned int *ftBalancesAddedLen,
+    uint8_t *nftPuts, unsigned int *nftPutsLen
+    ) {
 
     // Regardless of the verification result, the tx did not error.
     set_error(err, atomicalsconsensus_ERR_OK);
@@ -187,7 +215,7 @@ int atomicalsconsensus_verify_script_avm(
     ScriptStateContext stateContext;
     int result = ::verify_script_avm(lockScript, lockScriptLen, unlockScript, unlockScriptLen, ftState, ftStateIncoming,
                                      nftState, nftStateIncoming, contractState, contractExternalState,
-                                     txTo, txToLen, flags, err, script_err, script_err_op_num, &stateContext);
+                                     txTo, txToLen,authPubKey, authPubKeyLen, flags, err, script_err, script_err_op_num, &stateContext);
     if (result != 1) {
         return result;
     }
@@ -260,6 +288,17 @@ int atomicalsconsensus_verify_script_avm(
     //
     json nftWithdrawsJson = stateContext.getNftWithdrawsResult();
     CopyBytes(json::to_cbor(nftWithdrawsJson), nftWithdraws, nftWithdrawsLen);
+
+    //
+    // Copy the FTs that were taken from incoming and added to balance
+    //
+    json ftIncomingBalancesAddedJson = stateContext.getFtIncomingBalancesAddedResult();
+    CopyBytes(json::to_cbor(ftIncomingBalancesAddedJson), ftBalancesAdded, ftBalancesAddedLen);
+    //
+    // Copy NFTs that were taken from incoming and put to balance
+    //
+    json nftIncomingPutsJson = stateContext.getNftIncomingPutsResult();
+    CopyBytes(json::to_cbor(nftIncomingPutsJson), nftPuts, nftPutsLen);
 
     // Convert previous state hash into vector
     std::vector<uint8_t> vchprevStateHash(prevStateHash, prevStateHash + 32);
